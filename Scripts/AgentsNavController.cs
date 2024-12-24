@@ -1,4 +1,5 @@
-﻿using ProjectDawn.Navigation.Hybrid;
+using ProjectDawn.Navigation.Hybrid;
+using RTSEngine;
 using RTSEngine.Entities;
 using RTSEngine.EntityComponent;
 using RTSEngine.Event;
@@ -7,13 +8,11 @@ using RTSEngine.Logging;
 using RTSEngine.Movement;
 using System;
 using System.Collections;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 using Unity.Mathematics;
 using UnityEngine;
 
+namespace RTSEngineNavAgentsIntegration
+{
     public class AgentsNavController : MonoBehaviour, IMovementController
     {
         #region Attributes
@@ -34,11 +33,11 @@ using UnityEngine;
             get => !navAgent.EntityBody.IsStopped;
         }
 
-    public AgentAuthoring navAgent;
-    public AgentCylinderShapeAuthoring agentShape;
-    public AgentNavMeshAuthoring agentNavmesh;
-    public AgentAvoidAuthoring agentAvoidance;
-        //private NavMeshPath navPath;
+        public AgentAuthoring navAgent;
+        public AgentCylinderShapeAuthoring agentShape;
+        public AgentNavMeshAuthoring agentNavmesh;
+        public AgentAvoidAuthoring agentAvoidance;
+        public AgentSeparationAuthoring agentSeparation;
 
         private MovementControllerData data;
 
@@ -55,14 +54,14 @@ using UnityEngine;
             {
                 data = value;
 
-                var currentSteering = navAgent.EntitySteering;
+                var currentSteering = navAgent.EntityLocomotion;
 
                 currentSteering.Speed = data.speed;
                 currentSteering.Acceleration = data.acceleration;
                 //currentSteering.AngularSpeed = data.angularSpeed;
                 currentSteering.StoppingDistance = data.stoppingDistance;
 
-                navAgent.EntitySteering = currentSteering;
+                navAgent.EntityLocomotion = currentSteering;
 
                 var currentBody = navAgent.EntityBody;
                 // If the speed value is positive and the movement was stopped (due to a game pause for example) before this assignment
@@ -87,7 +86,7 @@ using UnityEngine;
             }
         }
 
-        public LayerMask NavigationAreaMask => agentNavmesh.DefaulPath.AreaMask;
+        public LayerMask NavigationAreaMask => agentNavmesh.DefaultPath.AreaMask;
 
         public float Radius => agentShape.EntityShape.Radius;
 
@@ -139,10 +138,15 @@ using UnityEngine;
             agentNavmesh.enabled = true;
 
             agentAvoidance = Entity.gameObject.GetComponent<AgentAvoidAuthoring>();
-            if (!logger.RequireValid(agentAvoidance,
-                $"[{GetType().Name} - '{Entity.Code}'] '{typeof(AgentAvoidAuthoring).Name}' component must be attached to the unit."))
-                return;
-            agentAvoidance.enabled = true;
+            agentSeparation = Entity.gameObject.GetComponent<AgentSeparationAuthoring>();
+
+            logger.RequireTrue(agentAvoidance.IsValid() || agentSeparation.IsValid(),
+                $"[{GetType().Name} - '{Entity.Code}'] 'Either {typeof(AgentAvoidAuthoring).Name}' or '{typeof(AgentSeparationAuthoring).Name}' component must be attached to the unit for avoidance.", this, LoggingType.warning);
+               
+            if (agentAvoidance.IsValid())
+                agentAvoidance.enabled = false;
+            if (agentSeparation.IsValid())
+                agentSeparation.enabled = true;
 
             this.Data = data;
 
@@ -163,6 +167,9 @@ using UnityEngine;
             this.LastSource = source;
             this.LastDestination = destination;
             navAgent.SetDestination(destination);
+
+            // kaahl's fix for unit not rotating
+            mvtComponent.OnPathPrepared(LastSource);
         }
 
         public void Launch()
@@ -207,14 +214,20 @@ using UnityEngine;
         public void OnCarrierEnter()
         {
             //Disable navmesh agent transform syncing when unit enters building, otherwise the attacks will be launched from the agent's virtual position instead of the unit's position
-            //navAgent.updatePosition = false;
-            agentAvoidance.enabled = false;
+            if (agentAvoidance.IsValid())
+                agentAvoidance.enabled = false;
+            if (agentSeparation.IsValid())
+                agentSeparation.enabled = false;
 
         }
 
         public void OnCarrierExit()
         {
-            //navAgent.updatePosition = true;
-            agentAvoidance.enabled = true;
+            if (agentAvoidance.IsValid())
+                agentAvoidance.enabled = true;
+            if (agentSeparation.IsValid())
+                agentSeparation.enabled = true;
         }
     }
+
+}
